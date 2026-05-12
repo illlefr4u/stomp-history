@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "node",
+    "strict": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "noImplicitAny": false,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "engine/Engine.ts","engine/Constants.ts","engine/Structs.ts","engine/Enums.ts",
+    "engine/IEngine.ts","engine/IEngineHook.ts","engine/IRuleset.ts","engine/IValidator.ts",
+    "engine/DefaultRuleset.ts","engine/DefaultValidator.ts","engine/factories.ts",
+    "engine/mons/**/*.ts","engine/moves/**/*.ts","engine/abilities/**/*.ts","engine/effects/**/*.ts",
+    "engine/types/**/*.ts","engine/rng/**/*.ts","engine/hooks/**/*.ts","engine/lib/**/*.ts",
+    "engine/commit-manager/**/*.ts"
+  ],
+  "exclude": ["node_modules"]
+}
