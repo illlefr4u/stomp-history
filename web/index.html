@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Stomp History</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="toolbar" aria-label="History controls">
+        <div class="brand">
+          <h1>Stomp History</h1>
+          <p>Read-only MegaETH battle history by address.</p>
+        </div>
+        <form id="historyForm" class="form">
+          <label class="address-field">
+            <span>Address</span>
+            <input
+              id="addressInput"
+              name="address"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="0x..."
+              required
+            />
+          </label>
+          <label>
+            <span>Limit</span>
+            <input id="limitInput" name="limit" type="number" min="1" max="100" value="15" />
+          </label>
+          <label>
+            <span>From block</span>
+            <input id="fromBlockInput" name="fromBlock" type="number" min="0" placeholder="optional" />
+          </label>
+          <label class="check">
+            <input id="scanStartsInput" name="scanStarts" type="checkbox" />
+            <span>Scan starts</span>
+          </label>
+          <button type="submit">Fetch</button>
+        </form>
+      </section>
+
+      <section id="status" class="status" hidden></section>
+
+      <section class="content">
+        <aside class="battles">
+          <div class="section-head">
+            <h2>Battles</h2>
+            <span id="summaryText"></span>
+          </div>
+          <div id="battleList" class="battle-list"></div>
+        </aside>
+
+        <section class="detail">
+          <div id="emptyState" class="empty">
+            Enter an address, fetch history, then select a battle.
+          </div>
+          <article id="battleDetail" hidden></article>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
