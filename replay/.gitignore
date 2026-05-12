@@ -1,3 +1,4 @@
 node_modules/
 engine/
 .chomp-tmp/
+.chomp-tmp-tx/
