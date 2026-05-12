@@ -764,13 +764,13 @@ def render_share_text(payload: dict[str, Any], *, recent: int = 3) -> str:
     """Short copy-paste summary for chat/community posts."""
     address = payload["address"]
     lines = [
-        "I made a small read-only Stomp.gg history viewer for MegaETH.",
+        "I made a small terminal-first, read-only Stomp.gg history viewer for MegaETH.",
         "",
         "What it does:",
-        "- paste any player address",
+        "- paste any player address in the terminal",
         "- finds battles from public Engine events via Blockscout/RPC",
         "- shows W/L, opponent, teams, turn count, move count, and turn-by-turn move sequence",
-        "- supports terminal, JSON/Markdown export, and a local web UI",
+        "- terminal-first workflow, with JSON/Markdown export and an optional local web UI",
         "- no wallet connection, no browser storage, no signing, no transactions",
         "",
         "Repo: https://github.com/illlefr4u/stomp-history",
@@ -796,10 +796,14 @@ def render_share_text(payload: dict[str, Any], *, recent: int = 3) -> str:
     lines.extend(
         [
             "",
-            "Run:",
+            "Run in terminal:",
             "```bash",
             "python3 stomp_history.py <address> --terminal --limit 20",
-            "python3 server.py  # then open http://127.0.0.1:8765",
+            "```",
+            "",
+            "Optional local web UI:",
+            "```bash",
+            "python3 server.py  # then open http://127.0.0.1:8765 and click Fetch",
             "```",
             "",
             "Caveat: exact damage text is not emitted by the Engine events yet; this reconstructs the on-chain battle/move stream.",

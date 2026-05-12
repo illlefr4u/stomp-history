@@ -1,8 +1,8 @@
 # Stomp History
 
-Read-only battle history viewer for [stomp.gg](https://stomp.gg), an on-chain monster battler on MegaETH.
+Terminal-first read-only battle history viewer for [stomp.gg](https://stomp.gg), an on-chain monster battler on MegaETH.
 
-The tool lets you paste a player address, fetch public battle history, click a battle, and inspect the move sequence in a readable format. It does not connect to a wallet, does not read browser storage, and cannot sign or send transactions.
+The tool lets you paste a player address, fetch public battle history, choose a battle from the terminal, and inspect the move sequence in a readable format. It does not connect to a wallet, does not read browser storage, and cannot sign or send transactions.
 
 ## Features
 
@@ -10,10 +10,10 @@ The tool lets you paste a player address, fetch public battle history, click a b
 - Decodes `BattleStart`, `MonMove` / `MonMoves`, `EngineExecute`, and `BattleComplete` events.
 - Resolves player/opponent, winner, turn count, move count, teams, mon names, switches, rests, and move names when team data is available.
 - Decodes CPU battles, direct Engine starts, and PvP battles started through `SignedMatchmaker.startGame`.
-- Provides terminal, CLI, and local web UI output.
+- Terminal-first workflow, with optional JSON, Markdown, and local web output.
 - Uses only Python standard library.
 
-## Quick Start
+## Terminal Quick Start
 
 Clone the repo:
 
@@ -22,7 +22,7 @@ git clone https://github.com/illlefr4u/stomp-history.git
 cd stomp-history
 ```
 
-Most users should start with the terminal viewer:
+Start with the terminal viewer:
 
 ```bash
 python3 stomp_history.py 0x341cab8a3e3f09093b63967369c38d8df46aa1f9 --terminal --limit 15
@@ -44,7 +44,11 @@ Or use the stable player battle number:
 python3 stomp_history.py 0x341cab8a3e3f09093b63967369c38d8df46aa1f9 --player-battle 23 --limit 30
 ```
 
-## Web Viewer
+## Optional Web Viewer
+
+The web viewer is a secondary local UI over the same data. It waits for the user
+to click `Fetch` by default and does not fetch on page load unless `auto=true`
+is set explicitly.
 
 ```bash
 python3 server.py
@@ -56,7 +60,7 @@ Open:
 http://127.0.0.1:8765
 ```
 
-Then paste an address such as:
+Then paste an address and click `Fetch`, for example:
 
 ```text
 0x341cab8a3e3f09093b63967369c38d8df46aa1f9
