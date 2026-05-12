@@ -773,6 +773,8 @@ def render_share_text(payload: dict[str, Any], *, recent: int = 3) -> str:
         "- supports terminal, JSON/Markdown export, and a local web UI",
         "- no wallet connection, no browser storage, no signing, no transactions",
         "",
+        "Repo: https://github.com/illlefr4u/stomp-history",
+        "",
         f"Demo address: {address}",
         f"Decoded: {payload['decodedBattles']} battles from {payload['discoveredBattles']} discovered ({payload['wins']}W / {payload['losses']}L).",
     ]
