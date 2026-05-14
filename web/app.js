@@ -11,6 +11,8 @@ const battleDetail = document.querySelector("#battleDetail");
 
 let historyPayload = null;
 let selectedKey = null;
+let replayCache = new Map(); // battleKey -> replay payload
+let replayLoading = new Set();
 
 const params = new URLSearchParams(window.location.search);
 if (params.get("address")) {
@@ -114,6 +116,100 @@ function renderMove(move, playerIndex) {
   `;
 }
 
+function hpBar(mon) {
+  const pct = mon.maxHp > 0 ? Math.max(0, Math.min(100, (100 * mon.hp) / mon.maxHp)) : 0;
+  let hue = "good";
+  if (pct < 25) hue = "low";
+  else if (pct < 60) hue = "mid";
+  return `
+    <div class="hp-bar"><span class="hp-fill ${hue}" style="width:${pct.toFixed(1)}%"></span></div>
+    <span class="hp-num">${mon.hp}/${mon.maxHp}</span>
+  `;
+}
+
+function renderMonRow(mon, active, kod) {
+  const classes = ["mon-row"];
+  if (active) classes.push("active");
+  if (kod || mon.isKnockedOut) classes.push("ko");
+  const effChips = (mon.effects || [])
+    .map(e => `<span class="effect-chip" title="${escapeHtml(e.extraData || '')}">${escapeHtml(e.name)}</span>`)
+    .join("");
+  return `
+    <div class="${classes.join(' ')}">
+      <span class="mon-slot">${mon.slot + 1}</span>
+      <span class="mon-name">${escapeHtml(mon.name)}</span>
+      ${hpBar(mon)}
+      <span class="stamina">⚡${mon.stamina}/${mon.maxStamina}</span>
+      <span class="effects">${effChips}</span>
+    </div>
+  `;
+}
+
+function renderFrame(frame, sides, viewerIdx) {
+  const ourSide = viewerIdx === 1 ? "p1" : "p0";
+  const oursMons = ourSide === "p0" ? frame.p0Mons : frame.p1Mons;
+  const oppMons  = ourSide === "p0" ? frame.p1Mons : frame.p0Mons;
+  const oursActive = ourSide === "p0" ? frame.activeMonIndex[0] : frame.activeMonIndex[1];
+  const oppActive  = ourSide === "p0" ? frame.activeMonIndex[1] : frame.activeMonIndex[0];
+  const moves = (frame.moves || []).map(m =>
+    `<div class="frame-move ${m.side === ourSide ? 'yours' : 'theirs'}">
+       <span class="side-tag">${m.side === ourSide ? 'You' : 'Opp'}</span>
+       <span class="mono">${escapeHtml(m.activeMon)}</span>
+       <span class="action">${escapeHtml(m.label)}</span>
+     </div>`).join("");
+  const winnerBadge = frame.winnerIndex !== 2
+    ? `<span class="winner-pill">${frame.winnerIndex === viewerIdx ? 'You win' : 'Opp wins'}</span>`
+    : "";
+  return `
+    <div class="frame">
+      <div class="frame-head">
+        <span class="turn-pill">Turn ${frame.turnId}</span>
+        ${winnerBadge}
+      </div>
+      <div class="frame-moves">${moves || '<span class="muted">no moves</span>'}</div>
+      <div class="frame-teams">
+        <div class="frame-team">
+          <div class="team-head">You</div>
+          ${oursMons.map(m => renderMonRow(m, m.slot === oursActive)).join("")}
+        </div>
+        <div class="frame-team">
+          <div class="team-head">Opponent</div>
+          ${oppMons.map(m => renderMonRow(m, m.slot === oppActive)).join("")}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderReplay(battleKey, viewerIdx) {
+  const payload = replayCache.get(battleKey);
+  if (replayLoading.has(battleKey)) {
+    return `<div class="replay-status">Running replay…</div>`;
+  }
+  if (!payload) {
+    return `<div class="replay-status">
+      <button class="replay-btn" data-battle="${escapeHtml(battleKey)}">Run replay</button>
+      <span class="muted">Reconstructs HP, stamina, and effects from the on-chain move stream.</span>
+    </div>`;
+  }
+  if (!payload.ok) {
+    return `<div class="replay-status error">Replay failed: ${escapeHtml(payload.error || 'unknown')}</div>`;
+  }
+  const frames = payload.frames || [];
+  const final = frames[frames.length - 1];
+  return `
+    <div class="replay-block">
+      <div class="replay-head">
+        <strong>Replay timeline</strong>
+        <span class="muted">${frames.length} frames · ${final?.winnerIndex !== 2 ? (final.winnerIndex === viewerIdx ? 'you win' : 'opponent wins') : 'unfinished'}</span>
+      </div>
+      <div class="replay-frames">
+        ${frames.slice(1).map(f => renderFrame(f, null, viewerIdx)).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderDetail() {
   const battle = (historyPayload?.battles || []).find((item) => item.battleKey === selectedKey);
   if (!battle) {
@@ -140,9 +236,6 @@ function renderDetail() {
       <div class="battle-meta">
         ${escapeHtml(battle.p0)} vs ${escapeHtml(battle.p1)}
       </div>
-      <p class="decoder-note">
-        Decoded on-chain move stream. Damage, status ticks, Q5 timers, and other applied effects are not replayed yet.
-      </p>
       <div class="stats-grid">
         <div class="stat"><span>Result</span><strong>${escapeHtml(battle.result)}</strong></div>
         <div class="stat"><span>Opponent</span><strong>${escapeHtml(battle.opponentLabel)}</strong></div>
@@ -154,7 +247,11 @@ function renderDetail() {
       ${renderTeam("You", battle.teams?.[ourSide])}
       ${renderTeam("Opponent", battle.teams?.[oppSide])}
     </section>
+    <section id="replaySection" class="replay">
+      ${renderReplay(battle.battleKey, playerIndex)}
+    </section>
     <section class="turns">
+      <div class="section-head"><h3>On-chain move stream</h3></div>
       ${turns
         .map(
           (turn) => `
@@ -172,8 +269,32 @@ function renderDetail() {
         .join("")}
     </section>
   `;
+
+  const replayBtn = battleDetail.querySelector(".replay-btn");
+  if (replayBtn) {
+    replayBtn.addEventListener("click", () => runReplay(battle.battleKey, playerIndex));
+  }
   emptyState.hidden = true;
   battleDetail.hidden = false;
+}
+
+async function runReplay(battleKey, viewerIdx) {
+  const address = (historyPayload?.address || "").trim();
+  if (!address) return;
+  if (replayLoading.has(battleKey) || replayCache.has(battleKey)) return;
+  replayLoading.add(battleKey);
+  renderDetail();
+  try {
+    const query = new URLSearchParams({ address, battle: battleKey });
+    const response = await fetch(`/api/replay?${query}`);
+    const payload = await response.json();
+    replayCache.set(battleKey, payload);
+  } catch (err) {
+    replayCache.set(battleKey, { ok: false, error: err.message });
+  } finally {
+    replayLoading.delete(battleKey);
+    renderDetail();
+  }
 }
 
 async function fetchHistory(event) {
