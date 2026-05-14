@@ -17,7 +17,8 @@
     "engine/DefaultRuleset.ts","engine/DefaultValidator.ts","engine/factories.ts",
     "engine/mons/**/*.ts","engine/moves/**/*.ts","engine/abilities/**/*.ts","engine/effects/**/*.ts",
     "engine/types/**/*.ts","engine/rng/**/*.ts","engine/hooks/**/*.ts","engine/lib/**/*.ts",
-    "engine/commit-manager/**/*.ts"
+    "engine/commit-manager/**/*.ts","engine/teams/**/*.ts","engine/matchmaker/**/*.ts",
+    "engine/runtime/**/*.ts","engine/gacha/**/*.ts","engine/IRandomnessOracle.ts"
   ],
   "exclude": ["node_modules"]
 }

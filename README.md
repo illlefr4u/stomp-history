@@ -139,9 +139,13 @@ Response shape:
 
 The Engine events expose raw battle flow: battle key, players, winner, turn executions, active mon slot, move index, switch target, and extra data. Human-readable combat text such as exact damage lines is not emitted by the Engine event log.
 
-This viewer reconstructs the readable move sequence from public events plus historical team data. Exact damage replay is a separate layer that can be built on top of the same move stream.
+This viewer reconstructs the readable move sequence from public events plus historical team data.
 
-Current limitation: applied effects are not replayed yet. For example, if Embursa selects `Q5`, the viewer shows the `Q5` move selection, but it does not yet calculate the delayed Q5 timer, later Q5 damage, burn ticks, stat changes, or healing caused by effects.
+For full combat (HP, stamina, status ticks, Q5 timers, applied effects), the
+optional `replay/` package re-runs each battle through a transpiled copy of the
+on-chain Engine and emits a per-turn timeline. The web viewer shows that
+timeline next to the on-chain move stream when you click "Run replay" on a
+selected battle. See `replay/README.md` for build instructions.
 
 ## Network
 
@@ -160,9 +164,22 @@ python3 server.py --port 8765
 
 There is intentionally no build step and no wallet integration.
 
+## Optional: Full Combat Replay
+
+```bash
+cd replay
+npm install
+npm run build:engine    # clones chomp, transpiles, writes engine/ (~3s)
+```
+
+Once `replay/engine/` exists, `python3 server.py` exposes
+`GET /api/replay?address=<addr>&battle=<key>` which pipes the on-chain reveal
+stream through the transpiled Engine and returns a per-turn timeline of HP,
+stamina, applied effects, and KOs. The web viewer surfaces this with a
+"Run replay" button on each battle.
+
 ## Roadmap
 
-- Reconstruct exact damage/heal/status text from the on-chain move stream.
 - Add CSV export for battles and turns.
 - Add address labels for known CPU/matchmaker accounts.
 - Add caching for repeated team lookups.

@@ -37,9 +37,42 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/history":
             self.handle_history(parsed.query)
             return
+        if parsed.path == "/api/replay":
+            self.handle_replay(parsed.query)
+            return
         if parsed.path == "/":
             self.path = "/index.html"
         super().do_GET()
+
+    # cache: battleKey -> replay result (deterministic per key once teams known)
+    _replay_cache: dict[str, dict] = {}
+
+    def handle_replay(self, query: str) -> None:
+        params = parse_qs(query)
+        address = (params.get("address") or [""])[0]
+        battle_key = (params.get("battle") or [""])[0]
+        if not address or not battle_key:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "address and battle required"})
+            return
+        cached = Handler._replay_cache.get(battle_key.lower())
+        if cached is not None:
+            self.send_json(HTTPStatus.OK, {"ok": True, "fromCache": True, **cached})
+            return
+        try:
+            history = stomp_history.fetch_history(address, limit=200, include_events=False, enrich=True)
+            battle = next((b for b in history["battles"] if b["battleKey"].lower() == battle_key.lower()), None)
+            if battle is None:
+                self.send_json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "battle not found for that address"})
+                return
+            inputs = stomp_history.prepare_replay_inputs(battle)
+            result = stomp_history.run_replay_subprocess(inputs)
+            result["battleKey"] = battle_key
+            Handler._replay_cache[battle_key.lower()] = result
+            self.send_json(HTTPStatus.OK, {"ok": True, "fromCache": False, **result})
+        except stomp_history.HistoryError as exc:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+        except Exception as exc:
+            self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
 
     def handle_history(self, query: str) -> None:
         params = parse_qs(query)

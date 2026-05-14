@@ -2,23 +2,27 @@
 
 Goal: drive the transpiled `stompgg/chomp` Engine with on-chain commit/reveal pairs and emit a per-turn timeline so the viewer shows **full combat** (HP, statuses, KOs, applied effects) instead of just the move stream.
 
-## Status — scaffold
+## Status — working v1
 
 | | |
 |---|---|
-| **Transpile path** | Working. Pinned to chomp `a3a701de8a059d6284c3dc71bb0a521bf1a41b93` (last pre-quests commit). Use `main`'s transpiler version on that src — emits 103 files with 0 type errors after typecheck. |
-| **Engine API surface** | Identified. Key entry points: `Engine.startBattle(Battle)`, `Engine.executeWithMoves(battleKey, p0Move, p0Salt, p0Extra, p1Move, p1Salt, p1Extra)`, `Engine.executeWithSingleMove(...)` for force-switch turns, `Engine.getBattle(battleKey)` + `getMonValueForBattle(...)` for state reads. |
-| **Scaffolded** | `replay/scripts/fetch-and-transpile-engine.sh`, `replay/src/runReplay.ts` (skeleton with input/output types), `replay/tests/` (empty), gitignore for `engine/` output. |
-| **Open** | Concrete `IRuleset` / `IValidator` / `IRandomnessOracle` / `ITeamRegistry` wiring + state-capture loop + Node CLI shim consumed by `server.py`. |
+| **Transpile path** | Working. Pinned to chomp `a3a701de8a059d6284c3dc71bb0a521bf1a41b93`. `npm run build:engine` clones + transpiles in ~3s. |
+| **Harness** | `src/harness.ts` wraps the transpiled `Engine` (modeled on `snack/munch`'s `battle-harness.ts`): provides minimal `ITeamRegistry` / `IMatchmaker` stubs, registers on-chain contract addresses with the container, and uses the inline-stamina-regen sentinel as the ruleset to skip `DefaultRuleset.getInitialGlobalEffects`. |
+| **Catalog** | `src/data/addresses.ts` and `src/data/mons.ts` carry the 13-mon stat catalog + mainnet addresses pulled from `snack/munch`. |
+| **CLI** | `src/runReplay.ts` reads JSON inputs from stdin, executes the on-chain reveal stream turn-by-turn, and prints `{ ok, frames[] }` to stdout (`bigint` serialised as strings). |
+| **Integration** | `server.py` exposes `GET /api/replay?address=…&battle=…`; the web viewer renders the timeline per frame (HP bars, stamina, status chips, active highlight). |
 
 ## Quick start
 
 ```bash
-cd /Users/al/Documents/code/stomp-history/replay
+cd replay
 npm install
 npm run build:engine    # clones chomp, transpiles, writes engine/ (gitignored, ~3s)
 npm run typecheck       # 0 errors expected
 ```
+
+Then `python3 server.py` from the repo root exposes `/api/replay`. The web UI
+calls it on demand when you click "Run replay" on a selected battle.
 
 ## Why the transpile path works
 
@@ -30,18 +34,19 @@ One missing artefact (`rng/IGachaRNG.ts`) is patched in via the build script —
 
 `replay/engine/` is gitignored on purpose. The transpiler (extruder) is AGPL-3.0; its emitted runtime base classes likely carry the same license obligation. Keeping `engine/` ephemeral (build-time fetch) lets `stomp-history` itself stay MIT for the viewer parts. Anyone running the replay locally clones + transpiles the engine themselves under AGPL terms. If we later need to vendor `engine/` (e.g. for hosted deploy), the `replay/` subtree must be licensed AGPL-3.0.
 
-## Next steps
+## Known gaps
 
-1. **Wire concrete dependencies** in `runReplay.ts`:
-   - `DefaultRuleset` with the effect list pulled from on-chain `_effects` (or hardcoded list matching mainnet ruleset: `StaminaRegen`, `StatBoosts`, `BurnStatus`, `PanicStatus`, `SleepStatus`, `ZapStatus`, `FrostbiteStatus`, `Overclock`, ...).
-   - `DefaultValidator`.
-   - `RecordedSaltOracle` implementing `IRandomnessOracle` — returns the recorded salts in order so the engine produces the same crits / accuracy outcomes as on-chain.
-   - `StaticTeamRegistry` returning the 4-mon teams for each `(player, teamIndex)`.
-2. **State-capture loop**: after every `executeWithMoves`, call `engine.getBattle(key)` + `getMonValueForBattle` per mon per stat and serialize to `TimelineFrame`.
-3. **Node CLI shim**: stdin JSON `ReplayInputs` → stdout JSON `TimelineFrame[]`. Called by `server.py` via subprocess on the `/battle/<hash>/replay` route.
-4. **Tests**: pick 3–5 known battles from `~/Documents/code/stomp_gg/battle_logs/` with confirmed final state, assert replay produces matching final HP / KO list.
-5. **Web UI**: render frames in the existing terminal-styled viewer. Text per frame is fine for v1.
-6. **README pruning**: drop the "Current limitation" section in the parent `stomp-history/README.md` once the endpoint works.
+- No `IRuleset` wiring beyond the inline stamina-regen sentinel — global
+  effects from `DefaultRuleset.getInitialGlobalEffects` are skipped. Effects
+  that come from moves/abilities (Overclock, Chain Expansion, statuses) DO
+  apply correctly because the engine adds them via `addEffect` during normal
+  turn execution.
+- Salt encoding: on-chain salts are uint104 packed; we pad them to bytes32
+  before handing to `DefaultRandomnessOracle.getRNG(bytes32, bytes32)`. Should
+  match the chain's encoding because the chain itself stores salts in the same
+  packed form before hashing.
+- No regression tests yet. Adding a tiny fixture suite (input JSON → expected
+  final HP/KO list) is the obvious next step.
 
 ## Reference
 

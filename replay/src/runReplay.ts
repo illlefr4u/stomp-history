@@ -1,113 +1,166 @@
-// Replay harness for stomp-history viewer.
-// Drives the transpiled chomp Engine with on-chain commit/reveal pairs and
-// emits a per-turn timeline (HP, statuses, KOs, applied effects) so the
-// viewer can show full combat instead of just the on-chain move stream.
+// Node CLI: replays a stomp battle from on-chain inputs and prints a JSON
+// timeline to stdout. Used by stomp-history's server.py as a subprocess.
 //
-// Status: SCAFFOLD. Engine import path verified after `npm run build:engine`.
-// Pieces still to wire up:
-//   - Concrete IRuleset (DefaultRuleset) with effect list.
-//   - Concrete IValidator (DefaultValidator).
-//   - IRandomnessOracle that returns the recorded on-chain salts in order.
-//   - Team registry stub that resolves (player, teamIndex) → 4 mons.
-//   - State-capture loop after each executeWithMoves call.
+// Input format (stdin JSON):
+//   {
+//     "battleKey": "0x...",
+//     "p0": "0x...", "p1": "0x...",
+//     "p0MonIds": [n,n,n,n],
+//     "p1MonIds": [n,n,n,n],
+//     "turns": [
+//       { "p0": { "moveIndex": n, "salt": "0x...", "extraData": "0x..."|0|null },
+//         "p1": { "moveIndex": n, "salt": "0x...", "extraData": "0x..."|0|null } }
+//     ]
+//   }
 //
-// Once wired, `runReplay()` will be called from the Python server via a Node
-// subprocess: input JSON on stdin (battle hash + on-chain reveal stream),
-// output JSON timeline on stdout. Keep deterministic — same inputs → same
-// frames byte-for-byte.
+// Output format (stdout JSON): { ok: true, frames: TimelineFrame[] }
 
-import { Engine } from "../engine/Engine.js";
-import * as Structs from "../engine/Structs.js";
+import { readFileSync } from 'fs';
+import * as Constants from '../engine/Constants';
+import {
+  makeHarness,
+  startBattle,
+  executeTurn,
+  snapshotFrame,
+  type MoveDescription,
+  type TimelineFrame,
+} from './harness';
+import { MON_CATALOG } from './data/mons';
 
-export interface ReplayTurn {
-  /** Player 0's revealed move index (uint256). */
-  p0MoveIndex: bigint;
-  /** Player 0's salt (bytes32 hex). */
-  p0Salt: string;
-  /** Player 0's extra data (uint256), e.g. switch target index. */
-  p0ExtraData: bigint;
-  p1MoveIndex: bigint;
-  p1Salt: string;
-  p1ExtraData: bigint;
+interface RawMove {
+  moveIndex: number | string;
+  salt: string;
+  extraData?: number | string | null;
 }
 
-export interface ReplayInputs {
-  battleKey: string; // 0x-prefixed bytes32
+interface ReplayInputs {
   p0: string;
   p1: string;
-  /** Pre-registered team indices on whichever ITeamRegistry we use. */
-  p0TeamIndex: bigint;
-  p1TeamIndex: bigint;
-  turns: ReplayTurn[];
+  p0MonIds: number[];
+  p1MonIds: number[];
+  turns: Array<{ p0: RawMove | null; p1: RawMove | null }>;
 }
 
-export interface TimelineFrame {
-  turnId: number;
-  p0Active: number;
-  p1Active: number;
-  p0Mons: MonSnapshot[];
-  p1Mons: MonSnapshot[];
-  globalEffects: EffectSnapshot[];
-  winnerIndex: number | null;
+const FRIEND_TARGET_MOVES = new Set(['Hit And Dip', 'Round Trip', 'Guest Feature', 'Gilded Recovery']);
+const OPPONENT_TARGET_MOVES = new Set(['Sneak Attack']);
+
+function bi(x: number | string | bigint | null | undefined): bigint {
+  if (x === null || x === undefined) return 0n;
+  if (typeof x === 'bigint') return x;
+  if (typeof x === 'number') return BigInt(x);
+  const s = x.toString().trim();
+  if (s === '') return 0n;
+  return s.startsWith('0x') ? BigInt(s) : BigInt(s);
 }
 
-export interface MonSnapshot {
-  hp: bigint;
-  stamina: bigint;
-  effects: EffectSnapshot[];
-}
+function describeMove(
+  side: 'p0' | 'p1',
+  raw: RawMove | null,
+  activeMonIndex: number,
+  p0MonIds: number[],
+  p1MonIds: number[],
+): MoveDescription {
+  const ownIds = side === 'p0' ? p0MonIds : p1MonIds;
+  const oppIds = side === 'p0' ? p1MonIds : p0MonIds;
+  const activeMonId = ownIds[activeMonIndex];
+  const activeMon = MON_CATALOG[activeMonId]?.name ?? `Slot ${activeMonIndex}`;
 
-export interface EffectSnapshot {
-  name: string;
-  extraData: string;
-}
-
-export function runReplay(inputs: ReplayInputs): TimelineFrame[] {
-  // ---- TODO: bind concrete dependencies ----
-  // const validator = new DefaultValidator(...);
-  // const ruleset = new DefaultRuleset(engine, [new StaminaRegen(), new StatBoosts(), ...]);
-  // const oracle = new RecordedSaltOracle(inputs.turns.map(t => t.p0Salt /* or canonical */));
-  // const teamRegistry = new StaticTeamRegistry({ ... });
-  // const engineHooks = [];
-  // const moveManager = ZERO_ADDRESS;
-  // const matchmaker = STUB_MATCHMAKER;
-
-  const engine = new Engine();
-
-  // const battle: Structs.Battle = {
-  //   p0: inputs.p0,
-  //   p0TeamIndex: inputs.p0TeamIndex,
-  //   p1: inputs.p1,
-  //   p1TeamIndex: inputs.p1TeamIndex,
-  //   teamRegistry,
-  //   validator,
-  //   rngOracle: oracle,
-  //   ruleset,
-  //   moveManager,
-  //   matchmaker,
-  //   engineHooks,
-  // };
-  // engine.startBattle(battle);
-
-  const timeline: TimelineFrame[] = [];
-
-  for (let i = 0; i < inputs.turns.length; i++) {
-    const t = inputs.turns[i];
-    // engine.executeWithMoves(
-    //   inputs.battleKey,
-    //   t.p0MoveIndex, t.p0Salt, t.p0ExtraData,
-    //   t.p1MoveIndex, t.p1Salt, t.p1ExtraData,
-    // );
-    // timeline.push(snapshotState(engine, inputs.battleKey, i));
-    void engine;
-    void t;
+  if (!raw) {
+    return { side, moveIndex: -1, label: 'no-op', activeMonIndex, activeMon };
   }
 
-  return timeline;
+  const moveIndex = Number(raw.moveIndex);
+  const extra = Number(bi(raw.extraData));
+
+  if (BigInt(moveIndex) === Constants.SWITCH_MOVE_INDEX) {
+    const target = MON_CATALOG[ownIds[extra]]?.name ?? `Slot ${extra}`;
+    return { side, moveIndex, label: `Switch -> ${target}`, activeMonIndex, activeMon, target };
+  }
+  if (BigInt(moveIndex) === Constants.NO_OP_MOVE_INDEX) {
+    return { side, moveIndex, label: 'Rest / no-op', activeMonIndex, activeMon };
+  }
+
+  const slot = moveIndex; // setMove takes the user-facing 0..3 index
+  const monMoves = MON_CATALOG[activeMonId]?.moves ?? [];
+  const moveName = monMoves[slot] ? prettyMoveName(monMoves[slot]) : `move[${slot}]`;
+  let target: string | undefined;
+  if (FRIEND_TARGET_MOVES.has(moveName)) target = MON_CATALOG[ownIds[extra]]?.name;
+  else if (OPPONENT_TARGET_MOVES.has(moveName)) target = MON_CATALOG[oppIds[extra]]?.name;
+  return {
+    side,
+    moveIndex: slot,
+    label: target ? `${moveName} -> ${target}` : moveName,
+    activeMonIndex,
+    activeMon,
+    target,
+  };
 }
 
-// CLI shim: read JSON from argv[2] (path), emit JSON to stdout.
-if (typeof process !== "undefined" && process.argv[1] && process.argv[1].endsWith("runReplay.ts")) {
-  console.error("[runReplay] scaffold only — wire dependencies before running.");
-  process.exit(2);
+function prettyMoveName(key: string): string {
+  return key.toLowerCase().split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
 }
+
+function readAllStdin(): string {
+  return readFileSync(0, 'utf-8');
+}
+
+function main(): void {
+  const raw = readAllStdin();
+  let input: ReplayInputs;
+  try {
+    input = JSON.parse(raw);
+  } catch (err) {
+    process.stdout.write(JSON.stringify({ ok: false, error: `bad JSON input: ${(err as Error).message}` }));
+    process.exit(2);
+  }
+
+  const bundle = makeHarness();
+  const battleKey = startBattle(bundle, {
+    p0: input.p0,
+    p1: input.p1,
+    p0MonIds: input.p0MonIds,
+    p1MonIds: input.p1MonIds,
+  });
+
+  const frames: TimelineFrame[] = [];
+
+  // Pre-battle frame: nothing executed yet, no active mons.
+  frames.push(snapshotFrame(bundle, battleKey, [input.p0MonIds, input.p1MonIds], []));
+
+  for (let i = 0; i < input.turns.length; i++) {
+    const t = input.turns[i];
+    const prev = frames[frames.length - 1];
+    const [p0Active, p1Active] = prev.activeMonIndex;
+    const moves: MoveDescription[] = [
+      describeMove('p0', t.p0, p0Active, input.p0MonIds, input.p1MonIds),
+      describeMove('p1', t.p1, p1Active, input.p0MonIds, input.p1MonIds),
+    ];
+
+    try {
+      executeTurn(bundle, battleKey, {
+        p0MoveIndex: t.p0 ? bi(t.p0.moveIndex) : Constants.NO_OP_MOVE_INDEX,
+        p0Salt: t.p0?.salt ?? '0x' + '00'.repeat(32),
+        p0ExtraData: t.p0 ? bi(t.p0.extraData) : 0n,
+        p1MoveIndex: t.p1 ? bi(t.p1.moveIndex) : Constants.NO_OP_MOVE_INDEX,
+        p1Salt: t.p1?.salt ?? '0x' + '00'.repeat(32),
+        p1ExtraData: t.p1 ? bi(t.p1.extraData) : 0n,
+      });
+    } catch (err) {
+      process.stdout.write(JSON.stringify({
+        ok: false,
+        error: `engine threw on turn ${i + 1}: ${(err as Error).message}`,
+        frames,
+      }));
+      return;
+    }
+
+    frames.push(snapshotFrame(bundle, battleKey, [input.p0MonIds, input.p1MonIds], moves));
+
+    if (frames[frames.length - 1].winnerIndex !== 2) break;
+  }
+
+  process.stdout.write(JSON.stringify({ ok: true, frames }, (_k, v) =>
+    typeof v === 'bigint' ? v.toString() : v));
+}
+
+main();

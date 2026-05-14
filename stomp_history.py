@@ -590,6 +590,7 @@ def describe_move(move_event: dict[str, Any], teams: dict[str, list[dict[str, An
         "label": label,
         "move": move,
         "extraData": extra,
+        "salt": move_event.get("salt"),
         "blockNumber": move_event.get("blockNumber"),
         "transactionHash": move_event.get("transactionHash"),
         "logIndex": move_event.get("logIndex"),
@@ -722,6 +723,83 @@ def fetch_history(
         "warnings": warnings,
         "battles": battles,
     }
+
+
+def prepare_replay_inputs(battle: dict[str, Any]) -> dict[str, Any]:
+    """Build the JSON input expected by replay/src/runReplay.ts from a summarized
+    battle (output of summarize_battle). Returns None-friendly per-side moves so
+    the engine can no-op when only one side has a packed move (eg. force-switch).
+    """
+    teams = battle.get("teams") or {}
+    p0_ids = [mon["id"] for mon in teams.get("p0", [])]
+    p1_ids = [mon["id"] for mon in teams.get("p1", [])]
+
+    turns_out: list[dict[str, Any]] = []
+    for turn in battle.get("turns") or []:
+        by_side: dict[str, dict[str, Any] | None] = {"p0": None, "p1": None}
+        for move in turn.get("moves") or []:
+            side = move.get("side")
+            move_meta = move.get("move") or {}
+            move_index = move_meta.get("moveIndex")
+            if move_index is None:
+                continue
+            by_side[side] = {
+                "moveIndex": int(move_index) if int(move_index) < 125 else int(move_index),
+                "salt": move.get("salt") or "0x" + "00" * 32,
+                "extraData": int(move.get("extraData") or 0),
+            }
+        # If a slot stays unfilled, send NO_OP so the engine still advances.
+        turns_out.append({"p0": by_side["p0"], "p1": by_side["p1"]})
+
+    return {
+        "p0": battle.get("p0"),
+        "p1": battle.get("p1"),
+        "p0MonIds": p0_ids,
+        "p1MonIds": p1_ids,
+        "turns": turns_out,
+    }
+
+
+def run_replay_subprocess(inputs: dict[str, Any], cwd: Path | None = None) -> dict[str, Any]:
+    """Pipe `inputs` to `node --import tsx replay/src/runReplay.ts` and return its parsed JSON.
+
+    Raises HistoryError when the subprocess fails or returns non-JSON output.
+    """
+    import subprocess
+
+    root = cwd or Path(__file__).resolve().parent
+    replay_dir = root / "replay"
+    if not (replay_dir / "engine" / "Engine.ts").exists():
+        raise HistoryError(
+            "replay engine missing: run `cd replay && npm install && npm run build:engine`"
+        )
+
+    try:
+        proc = subprocess.run(
+            ["node", "--import", "tsx", str(replay_dir / "src" / "runReplay.ts")],
+            input=json.dumps(inputs).encode(),
+            capture_output=True,
+            cwd=str(replay_dir),
+            timeout=30,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise HistoryError(f"node binary not on PATH: {exc}")
+    except subprocess.TimeoutExpired:
+        raise HistoryError("replay subprocess timed out after 30s")
+
+    if proc.returncode != 0 and not proc.stdout:
+        raise HistoryError(
+            f"replay subprocess exited {proc.returncode}: {proc.stderr.decode(errors='replace')[:500]}"
+        )
+
+    raw = proc.stdout.decode(errors="replace").strip()
+    if not raw:
+        raise HistoryError(f"replay produced no output (stderr: {proc.stderr.decode(errors='replace')[:500]})")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HistoryError(f"replay returned non-JSON: {exc}; raw head={raw[:200]!r}")
 
 
 def render_markdown(payload: dict[str, Any]) -> str:
